@@ -1170,6 +1170,7 @@ function fflu!(P::Generic.Perm, A::MatrixElem{T}) where {T <: RingElement}
    rank = 0
    r = 1
    c = 1
+   k = 1
    R = base_ring(A)
    d = R(1)
    d2 = R(1)
@@ -1177,29 +1178,50 @@ function fflu!(P::Generic.Perm, A::MatrixElem{T}) where {T <: RingElement}
       return 0, d
    end
    t = R()
+
    while r <= m && c <= n
-      if iszero(A[r, c])
-         i = r + 1
-         while i <= m
-            if !iszero(A[i, c])
-               for j = 1:n
-                  A[i, j], A[r, j] = A[r, j], A[i, j]
-               end
-               P[r], P[i] = P[i], P[r]
-               break
-            end
-            i += 1
-         end
-         if i > m
-            c += 1
-            continue
-         end
+      # Look for a pivot
+      while k <= n
+          i = r
+          while i <= m
+              if !iszero(A[i, k])
+                  # Swap the rows once a pivot is found below (r,c)
+                  if i != r
+                      for j = 1:n
+                          A[i, j], A[r, j] = A[r, j], A[i, j]
+                      end
+                      P[r], P[i] = P[i], P[r]
+                  end
+                  # Swap columns if the found pivot is to the right of (r,c)
+                  if k != c
+                      for j = r + 1:m
+                          A[j, k], A[j, c] = A[j, c], A[j, k]
+                      end                          
+                  end
+                  break
+              end
+              i += 1
+          end
+          if i > m
+              k += 1
+          else
+              break
+          end
+      end
+
+      # If no pivots found in the lower-right block, just return as the
+      # the rest of the matrix is zero.
+      if k > n
+          # By our definition, if `A` is singular, the denominator is zero.
+         return rank, zero(R)
       end
       rank += 1
-      q = -A[r, c]
+      q = -A[r, k]
       for i = r + 1:m
-         for j = c + 1:n
+         for j = k + 1:n
             A[i, j] = mul_red!(A[i, j], A[i, j], q, false)
+
+            # Read row op multiplication constant from `L`
             t = mul_red!(t, A[i, c], A[r, j], false)
             A[i, j] = addeq!(A[i, j], t)
             A[i, j] = reduce!(A[i, j])
@@ -1210,8 +1232,8 @@ function fflu!(P::Generic.Perm, A::MatrixElem{T}) where {T <: RingElement}
             end
          end
       end
-      d = -A[r, c]
-      d2 = A[r, c]
+      d = -A[r, k]
+      d2 = A[r, k]
       r += 1
       c += 1
    end
@@ -1219,7 +1241,7 @@ function fflu!(P::Generic.Perm, A::MatrixElem{T}) where {T <: RingElement}
    return rank, d2
 end
 
-function fflu!(P::Generic.Perm, A::MatrixElem{T}) where {T <: Union{FieldElement, ResElem}}
+function fflu!(P::Generic.Perm, A::MatrixElem{T}) where {T <: Union{FieldElement, ResRing}}
    m = nrows(A)
    n = ncols(A)
    rank = 0
@@ -1272,6 +1294,25 @@ function fflu!(P::Generic.Perm, A::MatrixElem{T}) where {T <: Union{FieldElement
    end
    inv!(P)
    return rank, d2
+end
+
+function get_D_matrix(FFLU)
+  R = base_ring(FFLU)
+  n = nrows(FFLU)
+  D = zero_matrix(R, n, n) 
+  j = 0
+
+  pcols = _ut_pivot_columns(FFLU)
+  for i in 1:n
+      if i == 1
+          D[i,i] = inv(FFLU[i,pcols[i]])
+      elseif i < n
+          D[i,i] = inv(FFLU[i-1, pcols[i-1]] * FFLU[i, pcols[i]])
+      else
+          D[i,i] = inv(FFLU[i-1, pcols[i-1]])
+      end
+  end
+  return D
 end
 
 @doc Markdown.doc"""
